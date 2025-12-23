@@ -1,7 +1,7 @@
 "use server";
 
 import { auth } from "@/lib/auth/auth-node";
-import SignInButton from "@/components/SignInButton";
+import GoogleSignIn from "@/components/GoogleSignIn";
 import { SignOutButton } from "@/components/SignOutButton";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -21,7 +21,7 @@ export default async function Home() {
         </Link>
       )}
 
-      {session?.user ? <SignOutButton /> : <SignInButton />}
+      {session?.user ? <SignOutButton /> : <GoogleSignIn />}
     </div>
   );
 }

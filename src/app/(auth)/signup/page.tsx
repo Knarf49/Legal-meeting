@@ -1,23 +1,33 @@
-//TODO: implement login page
-import { Button } from "@/components/ui/button";
 import GoogleSignIn from "@/components/GoogleSignIn";
-import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-
-const LoginPage = () => {
+import Link from "next/link";
+//TODO: add signup logic
+const SignUpPage = () => {
   return (
     <div className="min-h-screen flex items-center justify-center">
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle className="text-center text-3xl font-bold">
-            Login
+            Sign Up
           </CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-4">
-          <form className="space-y-8">
+          <form className="space-y-4">
+            <div>
+              <Label htmlFor="username" className="mb-3">
+                Username
+              </Label>
+              <Input
+                type="text"
+                placeholder="Username"
+                id="username"
+                required
+              />
+            </div>
             <div>
               <Label htmlFor="email" className="mb-3">
                 Email
@@ -37,8 +47,8 @@ const LoginPage = () => {
               />
             </div>
 
-            <Button className="w-full" type="submit">
-              Login
+            <Button className="w-full mt-6" type="submit">
+              Sign Up
             </Button>
           </form>
 
@@ -49,9 +59,9 @@ const LoginPage = () => {
           <GoogleSignIn />
 
           <p className="text-sm text-center text-muted-foreground">
-            No account?{" "}
-            <Link href="/signup" className="underline">
-              Sign up
+            Already have account?{" "}
+            <Link href="/login" className="underline">
+              Login
             </Link>
           </p>
         </CardContent>
@@ -60,4 +70,4 @@ const LoginPage = () => {
   );
 };
 
-export default LoginPage;
+export default SignUpPage;
