@@ -1,9 +1,9 @@
 import { cn } from "@/lib/utils";
-import Image from "next/image";
+import { LucideIcon } from "lucide-react";
 
 interface HomeCardProps {
   className?: string;
-  img: string;
+  icon: LucideIcon;
   title: string;
   description: string;
   handleClick?: () => void;
@@ -11,7 +11,7 @@ interface HomeCardProps {
 
 export const HomeCard = ({
   className,
-  img,
+  icon: Icon,
   title,
   description,
   handleClick,
@@ -25,7 +25,7 @@ export const HomeCard = ({
       onClick={handleClick}
     >
       <div className="flex-center glassmorphism size-12 rounded-[10px]">
-        <Image src={img} alt="meeting" width={27} height={27} />
+        <Icon className="size-7" />
       </div>
 
       <div className="flex flex-col gap-2">

@@ -1,9 +1,8 @@
 "use client";
 import { ReactNode } from "react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import Image from "next/image";
+import { LucideIcon } from "lucide-react";
 
 interface MeetingModalProps {
   isOpen: boolean;
@@ -14,9 +13,9 @@ interface MeetingModalProps {
   handleClick?: () => void;
   buttonText?: string;
   instantMeeting?: boolean;
-  image?: string;
+  icon?: LucideIcon;
+  buttonIcon?: LucideIcon;
   buttonClassName?: string;
-  buttonIcon?: string;
 }
 
 const MeetingModal = ({
@@ -27,34 +26,31 @@ const MeetingModal = ({
   children,
   handleClick,
   buttonText,
-  image,
-  buttonIcon,
+  icon: Icon,
+  buttonIcon: ButtonIcon,
+  buttonClassName,
 }: MeetingModalProps) => {
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="flex w-full max-w-130 flex-col gap-6 border-none px-6 py-9">
         <div className="flex flex-col gap-6">
-          {image && (
+          {Icon && (
             <div className="flex justify-center">
-              <Image src={image} alt="checked" width={72} height={72} />
+              <Icon className="size-18 text-blue-1" />
             </div>
           )}
-          <h1 className={cn("text-3xl font-bold leading-10.5", className)}>
-            {title}
-          </h1>
+
+          <DialogTitle className={className}>{title}</DialogTitle>
+
           {children}
+
           <Button
-            className={"focus-visible:ring-0 focus-visible:ring-offset-0"}
+            className={`focus-visible:ring-0 focus-visible:ring-offset-0 ${
+              buttonClassName ?? ""
+            }`}
             onClick={handleClick}
           >
-            {buttonIcon && (
-              <Image
-                src={buttonIcon}
-                alt="button icon"
-                width={13}
-                height={13}
-              />
-            )}
+            {ButtonIcon && <ButtonIcon className="mr-2 size-4" />}
             {buttonText || "Schedule Meeting"}
           </Button>
         </div>

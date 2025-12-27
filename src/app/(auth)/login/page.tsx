@@ -8,7 +8,6 @@ import { Label } from "@/components/ui/label";
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
-//TODO: add login login
 
 const LoginPage = () => {
   const [email, setEmail] = useState("");

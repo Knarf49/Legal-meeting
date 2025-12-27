@@ -2,7 +2,7 @@
 
 import { auth } from "../auth/auth-node";
 import { StreamClient } from "@stream-io/node-sdk";
-export const apiKey = process.env.NEXT_PUBLIC_STREAM_API_KEY as string;
+const apiKey = process.env.NEXT_PUBLIC_STREAM_API_KEY as string;
 const apiSecret = process.env.STREAM_SECRET_KEY as string;
 
 export const tokenProvider = async () => {
@@ -20,6 +20,6 @@ export const tokenProvider = async () => {
     user_id: id as string,
     validity_in_seconds: exp,
   });
-  console.log("GENERATED TOKEN:", token);
+  // console.log("GENERATED TOKEN:", token);
   return token;
 };

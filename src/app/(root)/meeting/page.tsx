@@ -1,6 +1,6 @@
 import MeetingTypeList from "@/components/meeting/MeetingTypeList";
 
-const MeetingPage = () => {
+const MeetingMenuPage = () => {
   return (
     <div>
       <MeetingTypeList />
@@ -8,4 +8,4 @@ const MeetingPage = () => {
   );
 };
 
-export default MeetingPage;
+export default MeetingMenuPage;

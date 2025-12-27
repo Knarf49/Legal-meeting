@@ -1,4 +1,3 @@
-//TODO: add password into user table as hash
 import { prisma } from "@/db/client";
 
 export async function findUserByEmail(email: string) {

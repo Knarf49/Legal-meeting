@@ -10,7 +10,6 @@ import Link from "next/link";
 import { useState } from "react";
 import { credentialsLogin } from "../login/page";
 import { useRouter } from "next/navigation";
-//TODO: add signup logic
 
 const SignUpPage = () => {
   const [email, setEmail] = useState("");

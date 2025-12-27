@@ -4,6 +4,8 @@ import "./globals.css";
 import { ToastContainer } from "react-toastify";
 import SessionWrapper from "@/components/SessionWrapper";
 import StreamVideoProvider from "@/providers/StreamClientProvider";
+import "@stream-io/video-react-sdk/dist/css/styles.css";
+import "react-datepicker/dist/react-datepicker.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
