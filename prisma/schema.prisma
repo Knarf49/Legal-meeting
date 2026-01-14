@@ -19,6 +19,7 @@ model User {
   // Optional for WebAuthn support
   Authenticator Authenticator[]
 
+  records   Record[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -87,4 +88,56 @@ model Credential {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model RecordChat {
+  recordId String
+  chatId   String
+
+  record Record @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  chat   Chat   @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@id([recordId, chatId])
+  @@index([chatId])
+}
+
+model Chat {
+  id       String    @id @default(cuid())
+  title    String?
+  messages Message[]
+
+  records RecordChat[] // 👈 many-to-many
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum MessageRole {
+  tool
+  user
+  assistant
+}
+
+model Message {
+  id          String      @id @default(cuid())
+  chatId      String
+  role        MessageRole
+  content     String
+  metadata    Json?
+  isStreaming Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  chat        Chat        @relation(fields: [chatId], references: [id], onDelete: Cascade)
+}
+
+model Record {
+  id         String @id @default(cuid())
+  title      String
+  recordPath String
+  duration   Float
+  userId     String
+
+  chats RecordChat[] // 👈 many-to-many
+
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

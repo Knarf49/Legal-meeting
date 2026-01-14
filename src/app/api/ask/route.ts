@@ -1,44 +1,32 @@
+import { prisma } from "@/db/client";
+import { callAgent } from "@/lib/agent";
 import { NextRequest, NextResponse } from "next/server";
-import { agent } from "@/lib/agent";
-import { randomUUID } from "crypto";
-import { HumanMessage } from "langchain";
-//TODO: fix Missing required parameter: 'messages[3].content[0].type'c
+
 export async function POST(req: NextRequest) {
   try {
-    const { question, threadId } = await req.json();
+    const body = await req.json();
 
-    if (!question || typeof question !== "string") {
+    const messages = body.input?.messages;
+    const chatId = body.input?.configurable?.thread_id;
+    // console.log("BODY:", JSON.stringify(body, null, 2));
+
+    const lastUserMessage = messages[messages.length - 1];
+    if (!body) {
       return NextResponse.json(
         { error: "question is required" },
         { status: 400 }
       );
     }
 
-    const result = await agent.invoke(
-      {
-        messages: [new HumanMessage(question)],
+    await prisma.message.create({
+      data: {
+        chatId,
+        role: "user",
+        content: lastUserMessage.content,
       },
-      {
-        configurable: {
-          thread_id: threadId ?? randomUUID(),
-        },
-      }
-    );
-
-    const lastMessage = result.messages.at(-1);
-
-    const answer =
-      typeof lastMessage?.content === "string"
-        ? lastMessage.content
-        : Array.isArray(lastMessage?.content)
-        ? lastMessage.content.map((c) => c.text).join("")
-        : "";
-
-    return NextResponse.json({
-      question,
-      answer,
-      thread_id: threadId,
     });
+
+    return callAgent(body);
   } catch (error) {
     console.error("❌ /ask error:", error);
     return NextResponse.json(

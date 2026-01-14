@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { toast } from "react-toastify";
 import { Copy, LucideIcon } from "lucide-react";
 
-//TODO: fix meeting card Icon image's src prop into lucide-react
 interface MeetingCardProps {
   title: string;
   date: string;

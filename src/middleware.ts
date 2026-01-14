@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "./lib/auth/auth-edge";
 
-const protectedRoutes = ["/userInfo", "/meeting"];
+const protectedRoutes = ["/userInfo", "/meeting", "/ask", "/personalRoom"];
 const authRoutes = ["/login", "/signup"];
 
 export default async function middleware(request: NextRequest) {

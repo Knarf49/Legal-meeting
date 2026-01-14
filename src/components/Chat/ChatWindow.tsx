@@ -1,0 +1,328 @@
+"use client";
+
+import { useMemo, useCallback, useRef, useEffect, useState } from "react";
+import { type BaseMessage } from "@langchain/core/messages";
+import {
+  useStream,
+  FetchStreamTransport,
+} from "@langchain/langgraph-sdk/react";
+import {
+  AIMessage,
+  HumanMessage,
+  ToolCall,
+  ToolMessage,
+} from "@langchain/core/messages";
+import { ToolCallBubble, type ToolCallState } from "../ToolCall";
+import { ChatInput } from "./ChatInput";
+
+import TextType from "../TextType";
+import {
+  extractTextContent,
+  isAIMessage,
+  isHumanMessage,
+  isToolMessage,
+} from "@/lib/utils";
+import { toast } from "react-toastify";
+
+// Type for messages from database
+interface DbMessage {
+  id: string;
+  role: "user" | "assistant" | "tool";
+  content: string;
+  metadata?: any;
+}
+
+export default function ChatWindow({ chatId }: { chatId: string }) {
+  const apiKey = process.env.OPENAI_API_KEY as string;
+  const [dbMessages, setDbMessages] = useState<DbMessage[]>([]);
+
+  const transport = useMemo(() => {
+    return new FetchStreamTransport({
+      apiUrl: "/api/ask",
+      onRequest: async (url: string, init: RequestInit) => {
+        const customBody = JSON.stringify({
+          ...(JSON.parse(init.body as string) || {}),
+          apiKey: apiKey,
+        });
+
+        return {
+          ...init,
+          body: customBody,
+        };
+      },
+    });
+  }, [apiKey]);
+
+  const stream = useStream({ transport });
+  const assistantBufferRef = useRef("");
+
+  useEffect(() => {
+    if (!chatId) return;
+
+    let aborted = false;
+
+    // 1️⃣ reset assistant buffer เมื่อเปลี่ยน chat
+    assistantBufferRef.current = "";
+
+    // 2️⃣ โหลด messages จาก DB
+    const loadMessages = async () => {
+      try {
+        const res = await fetch(`/api/chat/${chatId}`, {
+          method: "GET",
+        });
+
+        if (!res.ok) return;
+
+        const data = await res.json();
+
+        if (!aborted && Array.isArray(data)) {
+          setDbMessages(data);
+        }
+      } catch (err) {
+        console.error("Failed to load messages", err);
+      }
+    };
+
+    loadMessages();
+
+    // 3️⃣ save assistant message เมื่อ stream จบ
+    if (!stream.isLoading && assistantBufferRef.current) {
+      const content = assistantBufferRef.current;
+
+      fetch("/api/saveMessage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chatId,
+          content,
+        }),
+      }).catch((err) => {
+        console.error("Failed to save assistant message", err);
+      });
+
+      assistantBufferRef.current = "";
+    }
+
+    return () => {
+      aborted = true;
+    };
+  }, [chatId, stream.isLoading]);
+
+  const allMessages = useMemo(() => {
+    const mappedDb = dbMessages.map((m) =>
+      m.type === "human"
+        ? new HumanMessage({ content: m.content, id: m.id })
+        : new AIMessage({ content: m.content, id: m.id })
+    );
+
+    // Convert stream messages to proper LangChain message types
+    const mappedStreamMessages = stream.messages.map((m) => {
+      if (m.type === "human") {
+        return new HumanMessage({ content: m.content, id: m.id });
+      } else if (m.type === "ai") {
+        return new AIMessage({
+          content: m.content,
+          id: m.id,
+          tool_calls: (m as any).tool_calls || [],
+        });
+      } else if (m.type === "tool") {
+        return new ToolMessage({
+          content: m.content,
+          tool_call_id: (m as any).tool_call_id || "",
+          id: m.id,
+        });
+      }
+      // Fallback to AIMessage for unknown types
+      return new AIMessage({ content: m.content, id: m.id });
+    });
+
+    return [...mappedDb, ...mappedStreamMessages] as BaseMessage[];
+  }, [dbMessages, stream.messages]);
+
+  const toolCallsByMessage = useMemo(() => {
+    const map = new Map<BaseMessage, ToolCallState[]>();
+
+    allMessages.forEach((message) => {
+      // Only process AI messages (check both SDK format and LangChain Core format)
+      if (!isAIMessage(message)) {
+        return;
+      }
+      if (isAIMessage(message)) {
+        assistantBufferRef.current += extractTextContent(message.content);
+      }
+      const aiMessage = message as AIMessage;
+
+      // Extract tool calls from AIMessage - check both direct property and kwargs
+      let toolCalls: ToolCall[] = [];
+
+      // Check for tool_calls directly on message (SDK format)
+      if (aiMessage.tool_calls && Array.isArray(aiMessage.tool_calls)) {
+        toolCalls = aiMessage.tool_calls as ToolCall[];
+      }
+
+      // Extract tool messages (responses) - find ToolMessage type messages
+      const toolMessages: ToolMessage[] = [];
+      for (const msg of allMessages) {
+        if (isToolMessage(msg)) {
+          const toolMessage = msg as ToolMessage;
+          const toolCallId = toolMessage.tool_call_id;
+
+          if (toolCallId && toolCalls.some((tc) => tc.id === toolCallId)) {
+            toolMessages.push(msg as ToolMessage);
+          }
+        }
+      }
+
+      // Build tool call states
+      if (toolCalls.length > 0) {
+        const toolCallStates: ToolCallState[] = [];
+        for (const toolCall of toolCalls) {
+          const toolMessage = toolMessages.find((tm) => {
+            return tm.tool_call_id === toolCall.id;
+          });
+
+          toolCallStates.push({
+            toolCall,
+            toolMessage,
+          });
+        }
+        map.set(message, toolCallStates);
+      }
+    });
+
+    return map;
+  }, [allMessages]);
+
+  const handleSend = useCallback(
+    (messageOverride?: string) => {
+      const messageToSend = messageOverride || "";
+
+      if (!messageToSend.trim() || stream.isLoading) {
+        return;
+      }
+
+      // Submit message using stream API
+      stream.submit({
+        messages: [{ content: messageToSend, type: "human" }],
+        configurable: {
+          thread_id: chatId,
+        },
+      });
+    },
+    [chatId, stream]
+  );
+
+  const handleInputSubmit = useCallback(
+    (message: string) => {
+      handleSend(message);
+    },
+    [handleSend]
+  );
+
+  const isLoading = stream.isLoading;
+  const errorMessage =
+    stream.error instanceof Error
+      ? stream.error.message
+      : typeof stream.error === "string"
+      ? stream.error
+      : undefined;
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-6">
+      {/* Messages Area */}
+      <div className="flex-1 overflow-y-auto px-6 py-8 min-h-screen">
+        {allMessages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full">
+            <TextType
+              text={[
+                "กรรมการบริษัทจำกัดมีหน้าที่อะไรบ้าง",
+                "เปรียบเทียบหน้าที่และความรับผิดของกรรมการ",
+                "กรรมการพ้นจากตำแหน่งได้ในกรณีใด",
+              ]}
+              typingSpeed={75}
+            />
+          </div>
+        ) : (
+          <div className="max-w-3xl mx-auto space-y-6">
+            {/* Render messages - filter out tool messages as they're displayed separately */}
+            {allMessages
+              .filter((message) => !isToolMessage(message))
+              .map((message, messageIndex) => {
+                // Get tool calls associated with this AI message
+                const associatedToolCalls = isAIMessage(message)
+                  ? toolCallsByMessage.get(message) || []
+                  : [];
+
+                return (
+                  <div key={message.id || messageIndex}>
+                    {/* Message */}
+                    {extractTextContent(message.content) !== "" && (
+                      <div
+                        className={`flex ${
+                          isHumanMessage(message)
+                            ? "justify-end"
+                            : "justify-start"
+                        }`}
+                      >
+                        <div
+                          className={`max-w-[80%] rounded-lg px-4 py-3 ${
+                            isHumanMessage(message)
+                              ? "bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900"
+                              : "bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+                          }`}
+                        >
+                          <p className="whitespace-pre-wrap">
+                            {extractTextContent(message.content)}
+                            {messageIndex ===
+                              allMessages.filter((m) => !isToolMessage(m))
+                                .length -
+                                1 &&
+                              isLoading && (
+                                <span className="inline-block w-2 h-4 bg-gray-400 dark:bg-gray-600 ml-1 animate-pulse" />
+                              )}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    {/* Tool calls associated with this message */}
+                    {associatedToolCalls.map((toolCallState) => (
+                      <ToolCallBubble
+                        key={toolCallState.toolCall.id}
+                        toolCallState={toolCallState}
+                      />
+                    ))}
+                    {/* Error bubble associated with this message */}
+                    {errorMessage &&
+                      isAIMessage(message) &&
+                      messageIndex ===
+                        allMessages.filter((m) => !isToolMessage(m)).length -
+                          1 &&
+                      toast.error("Error")}
+                  </div>
+                );
+              })}
+            {isLoading && (
+              <div className="flex justify-center items-center gap-1.5 py-2">
+                <span
+                  className="inline-block w-2 h-2 bg-gray-400 dark:bg-gray-600 rounded-full animate-dot-wave"
+                  style={{ animationDelay: "0ms" }}
+                />
+                <span
+                  className="inline-block w-2 h-2 bg-gray-400 dark:bg-gray-600 rounded-full animate-dot-wave"
+                  style={{ animationDelay: "200ms" }}
+                />
+                <span
+                  className="inline-block w-2 h-2 bg-gray-400 dark:bg-gray-600 rounded-full animate-dot-wave"
+                  style={{ animationDelay: "400ms" }}
+                />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Input Area */}
+      <ChatInput onSubmit={handleInputSubmit} isLoading={isLoading} />
+    </div>
+  );
+}

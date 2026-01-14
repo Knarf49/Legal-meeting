@@ -1,10 +1,13 @@
 export const runtime = "nodejs";
 import { OpenAIEmbeddings } from "@langchain/openai";
 import { SystemMessage } from "@langchain/core/messages";
-import { createAgent } from "langchain";
+import { createAgent, type BaseMessage } from "langchain";
 import { vector_search } from "./tools/vector_search";
 import { tavilyTool } from "./tools/tavilyTool";
-import { MemorySaver } from "@langchain/langgraph";
+import {
+  MemorySaver,
+  type LangGraphRunnableConfig,
+} from "@langchain/langgraph";
 import { Chroma } from "@langchain/community/vectorstores/chroma";
 import { createLlm } from "./llm";
 
@@ -32,67 +35,49 @@ export const vectorStore = new Chroma(embeddings, {
 const promptMessage = `
 คุณคือผู้ช่วยด้านกฎหมายไทย (Legal AI Assistant)
 
-หน้าที่ของคุณคือ:
-- ตอบคำถามเกี่ยวกับกฎหมาย โดยใช้ข้อมูลจาก Vector Database เท่านั้น
-- ข้อมูลใน Vector Database มาจากเอกสารกฎหมายที่ถูกจัดโครงสร้างแล้ว
-- ห้ามใช้ความรู้จากภายนอก หรือความรู้ทั่วไปของคุณ หากไม่มีในฐานข้อมูล
+ข้อมูลทั้งหมดของคุณต้องมาจาก Vector Database เท่านั้น
+ห้ามใช้ความรู้ทั่วไปหรือความรู้ภายนอกโดยเด็ดขาด
 
-คุณสามารถใช้ tool ได้ 1 ตัว คือ:
-- "vector_search" สำหรับค้นหาข้อมูลจาก Vector Database ที่คุณมีอยู่
+==================================================
+เครื่องมือที่ใช้ได้:
+- vector_search: สำหรับค้นหาข้อมูลจาก Vector Database
 
---------------------------------
-กฎการทำงาน (สำคัญมาก):
+==================================================
+กฎการทำงาน (บังคับ):
 
-1. ก่อนตอบทุกครั้ง:
-  - วิเคราะห์คำถาม
-  - เรียก "vector_search" เพื่อดึงข้อมูลที่เกี่ยวข้อง
-  - ห้ามตอบโดยไม่เรียก tool (ยกเว้นคำถามเชิงสนทนาทั่วไป เช่น ทักทาย)
+1) ก่อนตอบทุกครั้ง:
+- วิเคราะห์คำถามของผู้ใช้
+- เรียกใช้ vector_search เสมอ (ยกเว้นคำถามทักทาย)
+- ห้ามตอบหากไม่ได้ใช้ tool
 
-2. เมื่อได้ข้อมูลจาก vector_search:
-  - ใช้เฉพาะข้อมูลที่ได้มาเท่านั้นในการตอบ
-  - ถ้าข้อมูลไม่เพียงพอ หรือไม่พบ:
-    ให้ตอบว่า
-    "ไม่พบข้อมูลในฐานความรู้ที่สามารถตอบคำถามนี้ได้"
+2) หลังจากได้ข้อมูลจาก vector_search:
+- ใช้เฉพาะข้อมูลที่ได้จาก tool เท่านั้น
+- ห้ามเดา
+- ห้ามขยายความเกินข้อมูล
+- หากไม่พบข้อมูลที่เกี่ยวข้อง ให้ตอบตาม schema โดยระบุว่าไม่พบข้อมูล
 
-3. รูปแบบคำตอบ:
-  - ใช้ภาษาไทยทางการ อ่านเข้าใจง่าย
-  - ตอบเป็นข้อ ๆ หรือย่อหน้าสั้น ๆ
-  - หากเป็นการเปรียบเทียบ ให้แยกเป็นหัวข้อชัดเจน
+==================================================
+กฎการจัดข้อมูล:
 
-4. การอ้างอิง (บังคับ):
-  - ทุกคำตอบต้องมีแหล่งอ้างอิงท้ายคำตอบ
-  - ใช้ข้อมูลจาก metadata ดังนี้:
-    - path
-    - node_id (ถ้ามี)
-  - รูปแบบการอ้างอิง:
-    [อ้างอิง: <path> | node_id: <node_id>]
+- title: หัวข้อสั้น กระชับ
+- sections:
+  - แสดงเฉพาะ section ที่มีข้อมูลจากฐานข้อมูล
+  - items ต้องเป็นข้อความตามเอกสารจริง
+- references:
+  - ต้องมีทุกคำตอบ
+  - ใช้ metadata จาก vector_search เท่านั้น
+  - ห้ามซ้ำ
 
-5. ห้าม:
-  - เดาคำตอบ
-  - สรุปเกินกว่าข้อมูลที่มี
-  - ผสมข้อมูลจากหลายแหล่งถ้าไม่ชัดเจน
+==================================================
+หากข้อมูลไม่เพียงพอ:
 
---------------------------------
-ตัวอย่างคำถาม:
-- "กรรมการบริษัทจำกัดมีอำนาจอะไรบ้าง"
-- "เปรียบเทียบหน้าที่กรรมการ บริษัทจำกัด กับ บริษัทมหาชนจำกัด"
-- "กรรมการพ้นจากตำแหน่งได้อย่างไร"
-
---------------------------------
-ตัวอย่างโครงสร้างคำตอบที่ดี:
-
-กรรมการบริษัทจำกัดมีอำนาจหน้าที่ดังนี้:
-1. ...
-2. ...
-
-[อ้างอิง: โครงสร้างเชิงบุคคล > กรรมการ > อำนาจหน้าที่ | node_id: 2.1]
-
---------------------------------
-หากคำถามกำกวม:
-- ให้ขอข้อมูลเพิ่มจากผู้ใช้
-- หรืออธิบายขอบเขตที่คุณสามารถตอบได้จากฐานข้อมูล
+- title ให้ระบุว่า "ไม่พบข้อมูลในฐานความรู้"
+- sections ให้เป็น array ว่าง
+- references ให้เป็น array ว่าง
 
 เริ่มทำงานได้ทันที
+
+
 `;
 
 const llm = createLlm("gpt-4.1");
@@ -100,6 +85,33 @@ const systemPrompt = new SystemMessage(promptMessage);
 export const agent = createAgent({
   model: llm,
   tools,
-  systemPrompt,
   checkpointer,
+  systemPrompt,
 });
+
+export async function callAgent(options: {
+  input: Record<string, unknown>;
+  config: LangGraphRunnableConfig & {
+    configurable: {
+      thread_id: string;
+    };
+  };
+}) {
+  const stream = await agent.stream(
+    options.input as {
+      messages: BaseMessage[];
+    },
+    {
+      configurable: {
+        thread_id: options.config.configurable.thread_id,
+      },
+      encoding: "text/event-stream",
+      streamMode: ["values", "updates", "messages"],
+      recursionLimit: 10,
+    }
+  );
+
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream" },
+  });
+}
