@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useCallback, useRef, useEffect, useState } from "react";
-import { type BaseMessage } from "@langchain/core/messages";
+import { useMemo, useCallback } from "react";
+import { type Message } from "@langchain/langgraph-sdk";
 import {
   useStream,
   FetchStreamTransport,
@@ -24,17 +24,10 @@ import {
 } from "@/lib/utils";
 import { toast } from "react-toastify";
 
-// Type for messages from database
-interface DbMessage {
-  id: string;
-  role: "user" | "assistant" | "tool";
-  content: string;
-  metadata?: any;
-}
+//TODO: implement checkpointer for chat history
 
 export default function ChatWindow({ chatId }: { chatId: string }) {
   const apiKey = process.env.OPENAI_API_KEY as string;
-  const [dbMessages, setDbMessages] = useState<DbMessage[]>([]);
 
   const transport = useMemo(() => {
     return new FetchStreamTransport({
@@ -54,101 +47,14 @@ export default function ChatWindow({ chatId }: { chatId: string }) {
   }, [apiKey]);
 
   const stream = useStream({ transport });
-  const assistantBufferRef = useRef("");
-
-  useEffect(() => {
-    if (!chatId) return;
-
-    let aborted = false;
-
-    // 1️⃣ reset assistant buffer เมื่อเปลี่ยน chat
-    assistantBufferRef.current = "";
-
-    // 2️⃣ โหลด messages จาก DB
-    const loadMessages = async () => {
-      try {
-        const res = await fetch(`/api/chat/${chatId}`, {
-          method: "GET",
-        });
-
-        if (!res.ok) return;
-
-        const data = await res.json();
-
-        if (!aborted && Array.isArray(data)) {
-          setDbMessages(data);
-        }
-      } catch (err) {
-        console.error("Failed to load messages", err);
-      }
-    };
-
-    loadMessages();
-
-    // 3️⃣ save assistant message เมื่อ stream จบ
-    if (!stream.isLoading && assistantBufferRef.current) {
-      const content = assistantBufferRef.current;
-
-      fetch("/api/saveMessage", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chatId,
-          content,
-        }),
-      }).catch((err) => {
-        console.error("Failed to save assistant message", err);
-      });
-
-      assistantBufferRef.current = "";
-    }
-
-    return () => {
-      aborted = true;
-    };
-  }, [chatId, stream.isLoading]);
-
-  const allMessages = useMemo(() => {
-    const mappedDb = dbMessages.map((m) =>
-      m.type === "human"
-        ? new HumanMessage({ content: m.content, id: m.id })
-        : new AIMessage({ content: m.content, id: m.id })
-    );
-
-    // Convert stream messages to proper LangChain message types
-    const mappedStreamMessages = stream.messages.map((m) => {
-      if (m.type === "human") {
-        return new HumanMessage({ content: m.content, id: m.id });
-      } else if (m.type === "ai") {
-        return new AIMessage({
-          content: m.content,
-          id: m.id,
-          tool_calls: (m as any).tool_calls || [],
-        });
-      } else if (m.type === "tool") {
-        return new ToolMessage({
-          content: m.content,
-          tool_call_id: (m as any).tool_call_id || "",
-          id: m.id,
-        });
-      }
-      // Fallback to AIMessage for unknown types
-      return new AIMessage({ content: m.content, id: m.id });
-    });
-
-    return [...mappedDb, ...mappedStreamMessages] as BaseMessage[];
-  }, [dbMessages, stream.messages]);
 
   const toolCallsByMessage = useMemo(() => {
-    const map = new Map<BaseMessage, ToolCallState[]>();
+    const map = new Map<Message, ToolCallState[]>();
 
-    allMessages.forEach((message) => {
+    stream.messages.forEach((message) => {
       // Only process AI messages (check both SDK format and LangChain Core format)
       if (!isAIMessage(message)) {
         return;
-      }
-      if (isAIMessage(message)) {
-        assistantBufferRef.current += extractTextContent(message.content);
       }
       const aiMessage = message as AIMessage;
 
@@ -162,7 +68,7 @@ export default function ChatWindow({ chatId }: { chatId: string }) {
 
       // Extract tool messages (responses) - find ToolMessage type messages
       const toolMessages: ToolMessage[] = [];
-      for (const msg of allMessages) {
+      for (const msg of stream.messages) {
         if (isToolMessage(msg)) {
           const toolMessage = msg as ToolMessage;
           const toolCallId = toolMessage.tool_call_id;
@@ -191,7 +97,7 @@ export default function ChatWindow({ chatId }: { chatId: string }) {
     });
 
     return map;
-  }, [allMessages]);
+  }, [stream.messages]);
 
   const handleSend = useCallback(
     (messageOverride?: string) => {
@@ -231,7 +137,7 @@ export default function ChatWindow({ chatId }: { chatId: string }) {
     <div className="max-w-3xl mx-auto space-y-6">
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto px-6 py-8 min-h-screen">
-        {allMessages.length === 0 ? (
+        {stream.messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full">
             <TextType
               text={[
@@ -245,7 +151,7 @@ export default function ChatWindow({ chatId }: { chatId: string }) {
         ) : (
           <div className="max-w-3xl mx-auto space-y-6">
             {/* Render messages - filter out tool messages as they're displayed separately */}
-            {allMessages
+            {stream.messages
               .filter((message) => !isToolMessage(message))
               .map((message, messageIndex) => {
                 // Get tool calls associated with this AI message
@@ -274,7 +180,7 @@ export default function ChatWindow({ chatId }: { chatId: string }) {
                           <p className="whitespace-pre-wrap">
                             {extractTextContent(message.content)}
                             {messageIndex ===
-                              allMessages.filter((m) => !isToolMessage(m))
+                              stream.messages.filter((m) => !isToolMessage(m))
                                 .length -
                                 1 &&
                               isLoading && (
@@ -295,7 +201,8 @@ export default function ChatWindow({ chatId }: { chatId: string }) {
                     {errorMessage &&
                       isAIMessage(message) &&
                       messageIndex ===
-                        allMessages.filter((m) => !isToolMessage(m)).length -
+                        stream.messages.filter((m) => !isToolMessage(m))
+                          .length -
                           1 &&
                       toast.error("Error")}
                   </div>

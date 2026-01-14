@@ -1,4 +1,3 @@
-import { prisma } from "@/db/client";
 import { callAgent } from "@/lib/agent";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -17,14 +16,6 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-
-    await prisma.message.create({
-      data: {
-        chatId,
-        role: "user",
-        content: lastUserMessage.content,
-      },
-    });
 
     return callAgent(body);
   } catch (error) {
