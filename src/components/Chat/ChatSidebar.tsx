@@ -8,37 +8,16 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { prisma } from "@/db/client";
 import { auth } from "@/lib/auth/auth-node";
 import Link from "next/link";
 import { CreateChatBtn } from "./CreateChatBtn";
+import { getRecordChats } from "@/lib/chatHistory";
 
 export default async function ChatSidebar({ recordId }: { recordId: string }) {
   const session = await auth();
-  if (!session?.user?.email) return null;
+  if (!session?.user?.id) return null;
 
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email },
-  });
-
-  if (!user) return null;
-
-  const chats = await prisma.recordChat.findMany({
-    where: {
-      recordId,
-      record: {
-        userId: user.id, // กัน record ของคนอื่น
-      },
-    },
-    include: {
-      chat: true,
-    },
-    orderBy: {
-      chat: {
-        updatedAt: "desc",
-      },
-    },
-  });
+  const recordChats = await getRecordChats(recordId, session.user.id as string);
 
   return (
     <Sidebar>
@@ -50,10 +29,10 @@ export default async function ChatSidebar({ recordId }: { recordId: string }) {
         <SidebarGroup>
           <SidebarGroupContent className="pl-4 pt-6">
             <SidebarMenu>
-              {chats.length === 0 ? (
+              {recordChats.length === 0 ? (
                 <span>Not have any chat yet.</span>
               ) : (
-                chats.map(({ chat }) => (
+                recordChats.map(({ chat }) => (
                   <SidebarMenuItem key={chat.id}>
                     <SidebarMenuButton asChild>
                       <Link href={`/recordings/${recordId}/chat/${chat.id}`}>

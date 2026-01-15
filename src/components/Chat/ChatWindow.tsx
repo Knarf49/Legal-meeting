@@ -1,21 +1,16 @@
 "use client";
 
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useEffect, useRef } from "react";
 import { type Message } from "@langchain/langgraph-sdk";
 import {
   useStream,
   FetchStreamTransport,
 } from "@langchain/langgraph-sdk/react";
-import {
-  AIMessage,
-  HumanMessage,
-  ToolCall,
-  ToolMessage,
-} from "@langchain/core/messages";
+import { AIMessage, ToolCall, ToolMessage } from "@langchain/core/messages";
 import { ToolCallBubble, type ToolCallState } from "../ToolCall";
 import { ChatInput } from "./ChatInput";
-
 import TextType from "../TextType";
+
 import {
   extractTextContent,
   isAIMessage,
@@ -24,10 +19,19 @@ import {
 } from "@/lib/utils";
 import { toast } from "react-toastify";
 
+interface ChatWindowProps {
+  chatId: string;
+  initialValues?: { messages: Array<{ type: string; content: string }> } | null;
+}
+
 //TODO: implement checkpointer for chat history
 
-export default function ChatWindow({ chatId }: { chatId: string }) {
+export default function ChatWindow({
+  chatId,
+  initialValues = null,
+}: ChatWindowProps) {
   const apiKey = process.env.OPENAI_API_KEY as string;
+  const lastMessageCountRef = useRef(0);
 
   const transport = useMemo(() => {
     return new FetchStreamTransport({
@@ -46,7 +50,46 @@ export default function ChatWindow({ chatId }: { chatId: string }) {
     });
   }, [apiKey]);
 
-  const stream = useStream({ transport });
+  const stream = useStream({
+    transport,
+    initialValues: initialValues,
+    threadId: chatId,
+  });
+
+  useEffect(() => {
+    const saveMessage = async () => {
+      if (stream.isLoading || stream.messages.length === 0) return;
+
+      // ตรวจสอบว่ามี message ใหม่หรือไม่
+      if (stream.messages.length <= lastMessageCountRef.current) return;
+
+      const lastMessage = stream.messages[stream.messages.length - 1];
+
+      // บันทึกเฉพาะ AI response
+      if (isAIMessage(lastMessage)) {
+        const content = extractTextContent(lastMessage.content);
+        if (content) {
+          try {
+            await fetch("/api/chat/message", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                chatId,
+                role: "assistant",
+                content,
+                updateTitle: stream.messages.length === 2, // Update title เมื่อมี 2 messages
+              }),
+            });
+            lastMessageCountRef.current = stream.messages.length;
+          } catch (error) {
+            console.error("Failed to save message:", error);
+          }
+        }
+      }
+    };
+
+    saveMessage();
+  }, [stream.isLoading, stream.messages, chatId]);
 
   const toolCallsByMessage = useMemo(() => {
     const map = new Map<Message, ToolCallState[]>();
@@ -100,19 +143,30 @@ export default function ChatWindow({ chatId }: { chatId: string }) {
   }, [stream.messages]);
 
   const handleSend = useCallback(
-    (messageOverride?: string) => {
+    async (messageOverride?: string) => {
       const messageToSend = messageOverride || "";
 
       if (!messageToSend.trim() || stream.isLoading) {
         return;
       }
 
+      try {
+        await fetch("/api/chat/message", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chatId,
+            role: "user",
+            content: messageToSend.trim(),
+          }),
+        });
+      } catch (err) {
+        toast.error("Failed to save message");
+      }
+
       // Submit message using stream API
       stream.submit({
         messages: [{ content: messageToSend, type: "human" }],
-        configurable: {
-          thread_id: chatId,
-        },
       });
     },
     [chatId, stream]

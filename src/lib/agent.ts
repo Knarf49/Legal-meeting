@@ -5,13 +5,22 @@ import { createAgent, type BaseMessage } from "langchain";
 import { vector_search } from "./tools/vector_search";
 import { tavilyTool } from "./tools/tavilyTool";
 import {
-  MemorySaver,
+  END,
   type LangGraphRunnableConfig,
+  START,
+  StateGraph,
 } from "@langchain/langgraph";
 import { Chroma } from "@langchain/community/vectorstores/chroma";
 import { createLlm } from "./llm";
+import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
+import { Pool } from "pg";
+import z from "zod";
 
-const checkpointer = new MemorySaver();
+// Checkpointer
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL, // postgres://...
+});
+const checkpointer = new PostgresSaver(pool);
 
 const tools = [vector_search, tavilyTool];
 
@@ -85,33 +94,203 @@ const systemPrompt = new SystemMessage(promptMessage);
 export const agent = createAgent({
   model: llm,
   tools,
-  checkpointer,
   systemPrompt,
 });
 
+//state
+const InputState = z.object({
+  thread_id: z.string().min(1),
+
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant", "system", "tool"]),
+        content: z.string(),
+      })
+    )
+    .min(1),
+});
+
+const OutputState = z.object({
+  title: z.string(),
+
+  sections: z.array(
+    z.object({
+      heading: z.string(),
+      items: z.array(z.string()).min(1),
+    })
+  ),
+
+  references: z.array(
+    z.object({
+      source: z.string(),
+      page: z.string().optional(),
+      law: z.string().optional(),
+    })
+  ),
+});
+
+const OverallStage = z.object({
+  /* =======================
+     META / THREAD
+  ======================= */
+  thread_id: z.string().min(1),
+
+  /* =======================
+     INPUT STAGE
+  ======================= */
+  input: z.object({
+    messages: z
+      .array(
+        z.object({
+          role: z.enum(["user", "assistant", "system", "tool"]),
+          content: z.string(),
+        })
+      )
+      .min(1),
+  }),
+
+  /* =======================
+     ANALYSIS STAGE
+     (LLM internal reasoning / plan)
+  ======================= */
+  analysis: z.object({
+    intent: z.string().optional(),
+    keywords: z.array(z.string()).default([]),
+    requires_tool: z.boolean().default(true),
+  }),
+
+  /* =======================
+     TOOL STAGE
+  ======================= */
+  tool: z.object({
+    name: z.string().optional(),
+    input: z.record(z.string(), z.any()).optional(),
+    raw_result: z.any().optional(),
+  }),
+
+  /* =======================
+     KNOWLEDGE STAGE
+     (Parsed vector DB result)
+  ======================= */
+  knowledge: z
+    .array(
+      z.object({
+        content: z.string(),
+        metadata: z.record(z.string(), z.any()),
+      })
+    )
+    .default([]),
+
+  /* =======================
+     OUTPUT STAGE
+  ======================= */
+  output: z.object({
+    title: z.string(),
+
+    sections: z.array(
+      z.object({
+        heading: z.string(),
+        items: z.array(z.string()).min(1),
+      })
+    ),
+
+    references: z.array(
+      z.object({
+        source: z.string(),
+        page: z.string().optional(),
+        law: z.string().optional(),
+      })
+    ),
+  }),
+
+  /* =======================
+     STATUS / CONTROL
+  ======================= */
+  status: z.enum([
+    "idle",
+    "analyzing",
+    "calling_tool",
+    "processing_knowledge",
+    "responding",
+    "done",
+    "error",
+  ]),
+
+  error: z.string().optional(),
+});
+
+//agent node
+const agentNode = async (state) => {
+  const result = await agent.invoke({
+    messages: state.messages,
+  });
+
+  return {
+    messages: result.messages,
+  };
+};
+
+// StateGraph
+const graph = new StateGraph({
+  state: OverallStage,
+  input: InputState,
+  output: OutputState,
+})
+  .addNode("agent", agentNode)
+  .addEdge(START, "agent")
+  .addEdge("agent", END)
+  .compile({
+    checkpointer, // ✅ Postgres
+  });
+
+//call agent
 export async function callAgent(options: {
-  input: Record<string, unknown>;
+  input: {
+    messages: BaseMessage[];
+  };
   config: LangGraphRunnableConfig & {
     configurable: {
       thread_id: string;
     };
   };
 }) {
-  const stream = await agent.stream(
-    options.input as {
-      messages: BaseMessage[];
+  // Map BaseMessage types to schema roles
+  const mapMessageRole = (
+    type: string
+  ): "user" | "assistant" | "system" | "tool" => {
+    const typeMap: Record<string, "user" | "assistant" | "system" | "tool"> = {
+      human: "user",
+      ai: "assistant",
+      system: "system",
+      tool: "tool",
+      HumanMessage: "user",
+      AIMessage: "assistant",
+      SystemMessage: "system",
+      ToolMessage: "tool",
+    };
+    return typeMap[type.toLowerCase()] ?? "user";
+  };
+
+  const stream = await graph.stream(
+    {
+      thread_id: options.config.configurable.thread_id,
+      messages: options.input.messages.map((msg) => ({
+        role: mapMessageRole(msg.type),
+        content:
+          typeof msg.content === "string"
+            ? msg.content
+            : JSON.stringify(msg.content),
+      })),
     },
     {
       configurable: {
         thread_id: options.config.configurable.thread_id,
       },
-      encoding: "text/event-stream",
-      streamMode: ["values", "updates", "messages"],
+      streamMode: "values",
       recursionLimit: 10,
     }
   );
 
-  return new Response(stream, {
-    headers: { "Content-Type": "text/event-stream" },
-  });
+  return stream;
 }

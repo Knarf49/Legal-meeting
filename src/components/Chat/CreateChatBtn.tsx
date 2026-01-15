@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { toast } from "react-toastify";
 
 export function CreateChatBtn({ recordId }: { recordId: string }) {
   const router = useRouter();
@@ -26,9 +27,10 @@ export function CreateChatBtn({ recordId }: { recordId: string }) {
 
       if (data.chatId) {
         router.push(`/recordings/${recordId}/chat/${data.chatId}`);
+        router.refresh();
       }
     } catch (err) {
-      console.error("Create chat failed", err);
+      toast.error("Create chat failed");
     } finally {
       setLoading(false);
     }

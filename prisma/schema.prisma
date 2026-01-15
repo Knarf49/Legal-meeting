@@ -141,3 +141,46 @@ model Record {
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
+
+model checkpoints {
+  thread_id            String
+  checkpoint_ns        String   @default("")
+  checkpoint_id        String
+  parent_checkpoint_id String?
+  type                 String
+  checkpoint           Json
+  metadata             Json
+  created_at           DateTime @default(now())
+
+  @@id([thread_id, checkpoint_ns, checkpoint_id])
+  @@index([thread_id])
+}
+
+model checkpoints_writes {
+  thread_id     String
+  checkpoint_ns String   @default("")
+  checkpoint_id String
+  task_id       String
+  idx           String
+  channel       String
+  type          String
+  value         Json
+  created_at    DateTime @default(now())
+
+  @@id([thread_id, checkpoint_ns, checkpoint_id, task_id, idx])
+  @@index([thread_id])
+}
+
+model checkpoint_blobs {
+  thread_id     String
+  checkpoint_ns String   @default("")
+  blob_id       String
+  channel       String
+  type          String
+  data          Bytes
+  version       Int      @default(0)
+  created_at    DateTime @default(now())
+
+  @@id([thread_id, checkpoint_ns, blob_id])
+  @@index([thread_id])
+}
